@@ -341,71 +341,81 @@ with tab1:
             adresse_recherche = st.text_input("Recherche d'adresse (ex: Almadies, Dakar) :", "")
             if adresse_recherche:
                 with st.spinner("Recherche..."):
-                    geolocator = Nominatim(user_agent="mirvanie_senegal_v1")
+                    geolocator = Nominatim(user_agent="mirvanie_senegal_v2")
                     try:
                         location = geolocator.geocode(f"{adresse_recherche}, Senegal")
                         if location: st.success(f"📍 {location.address}")
                         else: st.warning("Adresse introuvable. Utilisez la liste ci-dessous.")
                     except GeocoderTimedOut: st.warning("Service de géocodage indisponible.")
 
-            communes = sorted(df_zones['localisation'].unique())
-            loc_choisie = st.selectbox("Sélectionnez la micro-zone exacte :", communes)
+            # --- NOUVELLE LOGIQUE DE SÉLECTION (TYPE -> SEGMENT -> ZONE) ---
             
-            types_dispo = sorted(df_zones[df_zones['localisation'] == loc_choisie]['type_bien'].unique())
-            type_choisi = st.selectbox("Type de bien :", types_dispo)
+            # 1. On choisit le type de bien en premier
+            types_dispo = sorted(df_zones['type_bien'].unique())
+            type_choisi = st.selectbox("1. Type de bien :", types_dispo)
             
-            segments_dispo = sorted(df_zones[(df_zones['localisation'] == loc_choisie) & 
-                                             (df_zones['type_bien'] == type_choisi)]['segment'].unique())
-            segment_choisi = st.selectbox("Marché (Neuf ou Ancien) :", segments_dispo)
+            # 2. On choisit le marché (filtré par le type)
+            segments_dispo = sorted(df_zones[df_zones['type_bien'] == type_choisi]['segment'].unique())
+            segment_choisi = st.selectbox("2. Marché (Neuf, Ancien ou Global) :", segments_dispo)
+            
+            # 3. On choisit la localisation (filtrée par le type ET le segment)
+            loc_dispo = sorted(df_zones[(df_zones['type_bien'] == type_choisi) & 
+                                        (df_zones['segment'] == segment_choisi)]['localisation'].unique())
+            
+            if not loc_dispo:
+                st.error("Aucune donnée disponible pour cette combinaison.")
+                loc_choisie = None
+            else:
+                loc_choisie = st.selectbox("3. Sélectionnez la micro-zone exacte :", loc_dispo)
 
-            st.subheader("📐 Configuration & Caractéristiques")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                surf_hab_defaut = 100 if type_choisi != "Terrain" else 0
-                surface_habitable = st.number_input("Surface habitable (m²) :", min_value=0, value=surf_hab_defaut)
+            if loc_choisie:
+                st.subheader("📐 Configuration & Caractéristiques")
+                col1, col2 = st.columns(2)
                 
-                if type_choisi == "Appartement":
-                    surface_terrain = 0
-                    st.info("Un appartement ne dispose pas de terrain privatif.")
-                else:
-                    surface_terrain = st.number_input("Surface totale du terrain (m²) :", min_value=10, value=100)
-                
-                if type_choisi != "Terrain":
-                    nb_pieces = st.number_input("Nombre de pièces :", min_value=1, value=3)
-                    nb_chambres = st.number_input("Nombre de chambres :", min_value=0, value=2)
-                    nb_sdb = st.number_input("Nombre de salles de bain :", min_value=1, value=1)
-                    etage = st.number_input("Étage (0 pour RDC) :", min_value=0, value=0) if type_choisi == "Appartement" else 0
+                with col1:
+                    surf_hab_defaut = 100 if type_choisi != "Terrain" else 0
+                    surface_habitable = st.number_input("Surface habitable (m²) :", min_value=0, value=surf_hab_defaut)
                     
-                    if type_choisi == "Maison/villa":
-                        cour_jardin = st.radio("Cour / Jardin :", ["Non", "Oui"])
+                    if type_choisi == "Appartement":
+                        surface_terrain = 0
+                        st.info("Un appartement ne dispose pas de terrain privatif.")
                     else:
-                        cour_jardin = "Non"
+                        surface_terrain = st.number_input("Surface totale du terrain (m²) :", min_value=10, value=100)
+                    
+                    if type_choisi != "Terrain":
+                        nb_pieces = st.number_input("Nombre de pièces :", min_value=1, value=3)
+                        nb_chambres = st.number_input("Nombre de chambres :", min_value=0, value=2)
+                        nb_sdb = st.number_input("Nombre de salles de bain :", min_value=1, value=1)
+                        etage = st.number_input("Étage (0 pour RDC) :", min_value=0, value=0) if type_choisi == "Appartement" else 0
                         
-                    annee_construction = st.number_input("Année de construction :", min_value=1900, max_value=2026, value=2015)
-                    etat_bien = st.selectbox("État du bien :", ["excellent", "bon", "moyen", "à rénover"])
-                else:
-                    nb_pieces, nb_chambres, nb_sdb, etage = 0, 0, 0, 0
-                    cour_jardin = "Oui"
-                    annee_construction = 2026
-                    etat_bien = "bon"
+                        if type_choisi == "Maison/villa":
+                            cour_jardin = st.radio("Cour / Jardin :", ["Non", "Oui"])
+                        else:
+                            cour_jardin = "Non"
+                            
+                        annee_construction = st.number_input("Année de construction :", min_value=1900, max_value=2026, value=2015)
+                        etat_bien = st.selectbox("État du bien :", ["excellent", "bon", "moyen", "à rénover"])
+                    else:
+                        nb_pieces, nb_chambres, nb_sdb, etage = 0, 0, 0, 0
+                        cour_jardin = "Oui"
+                        annee_construction = 2026
+                        etat_bien = "bon"
 
-            with col2:
-                # DOCUMENTS FONCIERS SÉNÉGAL
-                docs_foncier = st.multiselect("Document(s) foncier(s) :", [
-                    "Titre Foncier", "Bail Emphytéotique", "Acte Administratif", 
-                    "Délibération Municipale", "Permis d'Occuper", "Non communiqué"
-                ], default=["Titre Foncier"])
-                
-                parking_choices = st.multiselect("Stationnement :", ["Aucun", "Rue", "Privé", "Garage"], default=["Aucun"])
-                
-                # LISTE COMPLÈTE DES ÉQUIPEMENTS
-                equipements = st.multiselect("Équipements :", [
-                    "Balcon/Terrasse", "Ascenseur", "Piscine", "Chauffage", 
-                    "eau chaude", "panneau solaire", "Groupe électrogène",
-                    "Climatisation", "Électricité H24", "Sécurité 24h/24", 
-                    "Cuisine équipée"
-                ])
+                with col2:
+                    # DOCUMENTS FONCIERS SÉNÉGAL
+                    docs_foncier = st.multiselect("Document(s) foncier(s) :", [
+                        "Titre Foncier", "Bail Emphytéotique", "Acte Administratif", 
+                        "Délibération Municipale", "Permis d'Occuper", "Non communiqué"
+                    ], default=["Titre Foncier"])
+                    
+                    parking_choices = st.multiselect("Stationnement :", ["Aucun", "Rue", "Privé", "Garage"], default=["Aucun"])
+                    
+                    equipements = st.multiselect("Équipements :", [
+                        "Balcon/Terrasse", "Ascenseur", "Piscine", "Chauffage", 
+                        "eau chaude", "panneau solaire", "Groupe électrogène",
+                        "Climatisation", "Électricité H24", "Sécurité 24h/24", 
+                        "Cuisine équipée"
+                    ])
 
             submit = st.form_submit_button("💰 Lancer l'estimation", use_container_width=True)
 
