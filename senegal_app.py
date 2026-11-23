@@ -103,6 +103,15 @@ def generate_pdf(data, details, estimation_finale):
     pdf.set_font("helvetica", 'B', 14)
     pdf.cell(0, 10, "2. Synthese de l'estimation", ln=True)
     
+    # Affichage de l'avertissement de fallback si présent
+    if details.get("fallback_msg"):
+        pdf.set_text_color(200, 100, 0) # Orange
+        pdf.set_font("helvetica", 'I', 9)
+        pdf.multi_cell(0, 6, details["fallback_msg"])
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("helvetica", size=10)
+        pdf.ln(2)
+
     pdf.set_fill_color(240, 255, 240)
     pdf.set_font("helvetica", 'B', 16)
     pdf.cell(0, 15, f"Valeur estimee : {estimation_finale:,.0f} FCFA", border=1, ln=True, align='C', fill=True)
@@ -178,16 +187,29 @@ def generate_pdf(data, details, estimation_finale):
 
     return bytes(pdf.output())
 
-
-# --- LOGIQUE D'ESTIMATION STRICTE (ADAPTÉE SÉNÉGAL) ---
+# --- LOGIQUE D'ESTIMATION STRICTE ---
 def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_pieces, nb_chambres, nb_sdb, etage, cour_jardin, annee, etat, docs, equipements, parking_choices):
+    
+    fallback_msg = ""
     
     # 1. RÉCUPÉRATION DES PRIX DE BASE
     res_bati = df_zones[(df_zones['localisation'] == loc) & 
                         (df_zones['type_bien'] == type_bien) & 
                         (df_zones['segment'] == segment)]
+    
+    # --- LOGIQUE DE FALLBACK ---
+    if res_bati.empty and segment != "Global":
+        res_bati = df_zones[(df_zones['localisation'] == loc) & 
+                            (df_zones['type_bien'] == type_bien) & 
+                            (df_zones['segment'] == "Global")]
+        
+        if not res_bati.empty:
+            fallback_msg = f"Note : Les données spécifiques pour le marché '{segment}' ne sont pas disponibles pour cette zone. L'estimation a été calculée en utilisant la moyenne globale du marché."
+            segment = "Global" 
+            
     if res_bati.empty:
-        return None, None, "Données bâti non disponibles."
+        return None, None, "Aucune donnée disponible pour cette combinaison (Ville/Type)."
+
     prix_bati_m2 = (res_bati.iloc[0]['prix_min_m2'] + res_bati.iloc[0]['prix_max_m2']) / 2
 
     # Prix du Terrain
@@ -221,7 +243,6 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
 
     # 3. AJUSTEMENTS BÂTI
     if type_bien != "Terrain":
-        # Vétusté
         age = max(0, datetime.datetime.now().year - annee)
         coef_vetuste = max(0.70, 1 - (age * 0.01))
         if coef_vetuste < 1:
@@ -229,7 +250,6 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
             ajustements["Décote Vétusté (Âge)"] = {"pct": (coef_vetuste - 1) * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-        # État
         coef_etat_map = {"excellent": 1.10, "bon": 1.00, "moyen": 0.85, "à rénover": 0.60}
         coef_etat = coef_etat_map.get(etat.lower(), 1.0)
         if coef_etat != 1.0:
@@ -237,14 +257,12 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
             ajustements["Ajustement État Général"] = {"pct": (coef_etat - 1) * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-        # Chambres (Configuration)
         if nb_chambres > 3:
             bonus_conf_pct = min((nb_chambres - 3) * 0.02, 0.10)
             impact = valeur_bati_courante * bonus_conf_pct
             ajustements["Configuration (Chambres)"] = {"pct": bonus_conf_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-        # Étage (Appartement)
         if type_bien == "Appartement":
             if etage == 0:
                 bonus_etage_pct = 0.02
@@ -257,7 +275,7 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
                 ajustements["Étage élevé sans ascenseur"] = {"pct": malus_etage_pct * 100, "valeur": impact}
                 valeur_bati_courante += impact
 
-        # Équipements (LISTE COMPLÈTE)
+        # Équipements
         bonus_equip_pct = 0
         if "Piscine" in equipements: bonus_equip_pct += 0.08
         if "Ascenseur" in equipements: bonus_equip_pct += 0.05
@@ -278,7 +296,6 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
             ajustements["Équipements de confort"] = {"pct": bonus_equip_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-        # Parking
         bonus_parking_pct = 0
         if "Privé" in parking_choices: bonus_parking_pct += 0.03
         if "Garage" in parking_choices: bonus_parking_pct += 0.05
@@ -288,15 +305,14 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
             ajustements["Stationnement"] = {"pct": bonus_parking_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-    # 4. AJUSTEMENTS TERRAIN (Spécifique Sénégal)
+    # 4. AJUSTEMENTS TERRAIN (Sénégal)
     if valeur_terrain_courante > 0:
-        # Hiérarchie des documents fonciers sénégalais
         coef_doc_map = {
-            "Titre Foncier": 1.20,             # Le Graal
-            "Bail Emphytéotique": 1.10,        # Très sécurisé
-            "Acte Administratif": 0.95,        # Intermédiaire
-            "Délibération Municipale": 0.80,   # Précaire
-            "Permis d'Occuper": 0.75,          # Très précaire
+            "Titre Foncier": 1.20,             
+            "Bail Emphytéotique": 1.10,        
+            "Acte Administratif": 0.95,        
+            "Délibération Municipale": 0.80,   
+            "Permis d'Occuper": 0.75,          
             "Non communiqué": 0.70
         }
         coef_doc = max([coef_doc_map.get(d, 0.70) for d in docs]) if docs else 0.70
@@ -319,7 +335,8 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
         "prix_bati_m2": prix_bati_m2,
         "prix_terrain_m2": prix_terrain_m2,
         "valeur_base_simple": valeur_base_simple,
-        "ajustements": ajustements
+        "ajustements": ajustements,
+        "fallback_msg": fallback_msg
     }
     
     return estimation_finale, details, None
@@ -335,18 +352,19 @@ with tab1:
         with st.form("estimation_form"):
             st.subheader("📍 Localisation")
             
-            # --- LOGIQUE DE SÉLECTION IDENTIQUE À LA CÔTE D'IVOIRE ---
-            # 1. Localisation
+            # LOGIQUE DE SÉLECTION (Localisation -> Type -> Marché)
             communes = sorted(df_zones['localisation'].unique())
             loc_choisie = st.selectbox("1. Sélectionnez la micro-zone :", communes)
             
-            # 2. Type de bien (filtré par la localisation)
             types_dispo = sorted(df_zones[df_zones['localisation'] == loc_choisie]['type_bien'].unique())
             type_choisi = st.selectbox("2. Type de bien :", types_dispo)
             
-            # 3. Marché (filtré par la localisation et le type)
-            segments_dispo = sorted(df_zones[(df_zones['localisation'] == loc_choisie) & 
-                                             (df_zones['type_bien'] == type_choisi)]['segment'].unique())
+            # On force les options Neuf/Ancien/Global pour permettre le fallback si la donnée manque
+            if type_choisi == "Terrain":
+                segments_dispo = ["Global"]
+            else:
+                segments_dispo = ["Neuf", "Ancien", "Global"]
+            
             segment_choisi = st.selectbox("3. Marché (Neuf, Ancien ou Global) :", segments_dispo)
 
             st.subheader("📐 Configuration & Caractéristiques")
@@ -382,7 +400,6 @@ with tab1:
                     etat_bien = "bon"
 
             with col2:
-                # DOCUMENTS FONCIERS SÉNÉGAL
                 docs_foncier = st.multiselect("Document(s) foncier(s) :", [
                     "Titre Foncier", "Bail Emphytéotique", "Acte Administratif", 
                     "Délibération Municipale", "Permis d'Occuper", "Non communiqué"
@@ -390,7 +407,6 @@ with tab1:
                 
                 parking_choices = st.multiselect("Stationnement :", ["Aucun", "Rue", "Privé", "Garage"], default=["Aucun"])
                 
-                # LISTE COMPLÈTE DES ÉQUIPEMENTS
                 equipements = st.multiselect("Équipements :", [
                     "Balcon/Terrasse", "Ascenseur", "Piscine", "Chauffage", 
                     "eau chaude", "panneau solaire", "Groupe électrogène",
@@ -410,6 +426,10 @@ with tab1:
             if erreur:
                 st.warning(erreur)
             else:
+                # Affichage du message d'avertissement Fallback
+                if details.get("fallback_msg"):
+                    st.warning(details["fallback_msg"])
+
                 st.success("### 📊 Estimation Mirvanie Sénégal")
                 col_res1, col_res2 = st.columns([1, 1])
                 with col_res1:
