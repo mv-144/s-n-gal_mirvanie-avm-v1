@@ -9,10 +9,11 @@ from geopy.exc import GeocoderTimedOut
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Mirvanie Sénégal - Estimateur", page_icon="🇸🇳", layout="wide")
 
+# Couleurs du Sénégal (Vert)
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stButton>button { background-color: #00853F; color: white; border-radius: 5px; } /* Vert Sénégal */
+    .stButton>button { background-color: #00853F; color: white; border-radius: 5px; }
     .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
     </style>
 """, unsafe_allow_html=True)
@@ -47,12 +48,13 @@ def load_zones():
 
 df_zones = load_zones()
 
-# --- GÉNÉRATION DU PDF ---
+# --- GÉNÉRATION DU PDF COMPLET ---
 def generate_pdf(data, details, estimation_finale):
     pdf = FPDF()
     pdf.add_page()
     
-    pdf.set_fill_color(0, 133, 63) # Vert Sénégal
+    # 1. En-tête (Vert Sénégal)
+    pdf.set_fill_color(0, 133, 63)
     pdf.rect(0, 0, 210, 35, 'F')
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("helvetica", 'B', 22)
@@ -60,6 +62,7 @@ def generate_pdf(data, details, estimation_finale):
     pdf.set_font("helvetica", 'I', 12)
     pdf.cell(0, 10, "Rapport d'Estimation Immobiliere", ln=True, align='C')
     
+    # 2. Description
     pdf.set_text_color(0, 0, 0)
     pdf.ln(15)
     pdf.set_font("helvetica", 'B', 14)
@@ -86,8 +89,10 @@ def generate_pdf(data, details, estimation_finale):
         add_row("Nombre de chambres :", data['Nb_chambres'])
         add_row("Salles de bain :", data['Nb_sdb'])
         add_row("Etage :", data['Etage'])
+        
         if data['Type'] == "Maison/villa":
             add_row("Cour / Jardin :", data['Cour_jardin'])
+            
         add_row("Annee de construction :", data['Annee'])
         add_row("Etat du bien :", data['Etat'])
 
@@ -95,32 +100,45 @@ def generate_pdf(data, details, estimation_finale):
     add_row("Equipements :", data['Equipements'])
     add_row("Stationnement :", data['Parking'])
 
+    # 3. Synthèse
     pdf.ln(10)
     pdf.set_font("helvetica", 'B', 14)
     pdf.cell(0, 10, "2. Synthese de l'estimation", ln=True)
     
-    pdf.set_fill_color(240, 255, 240) # Vert très clair
+    pdf.set_fill_color(240, 255, 240)
     pdf.set_font("helvetica", 'B', 16)
     pdf.cell(0, 15, f"Valeur estimee : {estimation_finale:,.0f} FCFA", border=1, ln=True, align='C', fill=True)
     
     pdf.set_font("helvetica", 'I', 10)
     pdf.cell(0, 10, f"Fourchette de confiance (-10% / +10%) : {estimation_finale * 0.90:,.0f} FCFA  -  {estimation_finale * 1.10:,.0f} FCFA", ln=True, align='C')
 
+    # 4. Méthodologie
     pdf.ln(10)
     pdf.set_font("helvetica", 'B', 14)
     pdf.cell(0, 10, "3. Methodologie de calcul", ln=True)
     pdf.set_font("helvetica", size=10)
     
     if data['Type'] == "Appartement":
-        texte_explication = f"L'estimation se base sur la valeur du bati (Indice de la zone : {details['prix_bati_m2']:,.0f} FCFA/m2) et des ajustements hedoniques."
+        texte_explication = (
+            f"L'estimation se base sur la valeur du bati. "
+            f"La valeur de base est calculee a partir du prix au m2 de la zone ({details['prix_bati_m2']:,.0f} FCFA/m2). "
+            f"Enfin, des ajustements sont appliques selon les caracteristiques propres au bien."
+        )
     else:
-        texte_explication = f"L'estimation separe la valeur du bati (Indice : {details['prix_bati_m2']:,.0f} FCFA/m2) et la valeur du terrain (Indice : {details['prix_terrain_m2']:,.0f} FCFA/m2)."
+        texte_explication = (
+            f"L'estimation se base sur la separation stricte de la valeur du bati et du terrain. "
+            f"La valeur de base du bati est calculee a partir du prix au m2 de la zone ({details['prix_bati_m2']:,.0f} FCFA/m2). "
+            f"La valeur du terrain est calculee en soustrayant la surface habitee de la surface totale, "
+            f"puis multipliee par le prix du terrain dans cette zone ({details['prix_terrain_m2']:,.0f} FCFA/m2). "
+            f"Enfin, des ajustements sont appliques selon les caracteristiques propres au bien."
+        )
     pdf.multi_cell(0, 6, texte_explication)
     
     pdf.ln(5)
     pdf.set_font("helvetica", 'B', 11)
     pdf.cell(0, 8, f"Valeur de base theorique (Sans ajustements) : {details['valeur_base_simple']:,.0f} FCFA", ln=True)
     
+    # 5. Tableau des ajustements
     pdf.ln(5)
     pdf.set_font("helvetica", 'B', 12)
     pdf.cell(0, 10, "Detail des ajustements appliques :", ln=True)
@@ -154,6 +172,7 @@ def generate_pdf(data, details, estimation_finale):
             pdf.set_text_color(0, 0, 0)
             pdf.cell(45, 7, f"{impact_val:+,.0f}", border=1, align='R', ln=True)
 
+    # 6. Pied de page
     pdf.ln(15)
     pdf.set_font("helvetica", 'I', 8)
     pdf.set_text_color(100, 100, 100)
@@ -161,22 +180,29 @@ def generate_pdf(data, details, estimation_finale):
 
     return bytes(pdf.output())
 
-# --- LOGIQUE D'ESTIMATION (Spécifique Sénégal) ---
+
+# --- LOGIQUE D'ESTIMATION STRICTE (ADAPTÉE SÉNÉGAL) ---
 def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_pieces, nb_chambres, nb_sdb, etage, cour_jardin, annee, etat, docs, equipements, parking_choices):
     
+    # 1. RÉCUPÉRATION DES PRIX DE BASE
     res_bati = df_zones[(df_zones['localisation'] == loc) & 
                         (df_zones['type_bien'] == type_bien) & 
                         (df_zones['segment'] == segment)]
     if res_bati.empty:
-        return None, None, "Données non disponibles pour cette combinaison (Type/Segment)."
+        return None, None, "Données bâti non disponibles."
     prix_bati_m2 = (res_bati.iloc[0]['prix_min_m2'] + res_bati.iloc[0]['prix_max_m2']) / 2
 
+    # Prix du Terrain
     if type_bien != "Appartement":
         res_terrain = df_zones[(df_zones['localisation'] == loc) & (df_zones['type_bien'] == "Terrain")]
-        prix_terrain_m2 = ((res_terrain.iloc[0]['prix_min_m2'] + res_terrain.iloc[0]['prix_max_m2']) / 2) if not res_terrain.empty else 0
+        if not res_terrain.empty:
+            prix_terrain_m2 = (res_terrain.iloc[0]['prix_min_m2'] + res_terrain.iloc[0]['prix_max_m2']) / 2
+        else:
+            prix_terrain_m2 = 0
     else:
         prix_terrain_m2 = 0
 
+    # 2. CALCUL DE LA BASE
     if type_bien == "Terrain":
         valeur_bati_base = 0
         valeur_terrain_base = surf_terrain * prix_bati_m2 
@@ -195,58 +221,68 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
     valeur_bati_courante = valeur_bati_base
     valeur_terrain_courante = valeur_terrain_base
 
+    # 3. AJUSTEMENTS BÂTI
     if type_bien != "Terrain":
+        # Vétusté
         age = max(0, datetime.datetime.now().year - annee)
         coef_vetuste = max(0.70, 1 - (age * 0.01))
         if coef_vetuste < 1:
             impact = valeur_bati_courante * (coef_vetuste - 1)
-            ajustements["Decote Vetuste (Age)"] = {"pct": (coef_vetuste - 1) * 100, "valeur": impact}
+            ajustements["Décote Vétusté (Âge)"] = {"pct": (coef_vetuste - 1) * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-        coef_etat_map = {"excellent": 1.10, "bon": 1.00, "moyen": 0.85, "a renover": 0.60}
+        # État
+        coef_etat_map = {"excellent": 1.10, "bon": 1.00, "moyen": 0.85, "à rénover": 0.60}
         coef_etat = coef_etat_map.get(etat.lower(), 1.0)
         if coef_etat != 1.0:
             impact = valeur_bati_courante * (coef_etat - 1)
-            ajustements["Ajustement Etat General"] = {"pct": (coef_etat - 1) * 100, "valeur": impact}
+            ajustements["Ajustement État Général"] = {"pct": (coef_etat - 1) * 100, "valeur": impact}
             valeur_bati_courante += impact
 
+        # Chambres (Configuration)
         if nb_chambres > 3:
             bonus_conf_pct = min((nb_chambres - 3) * 0.02, 0.10)
             impact = valeur_bati_courante * bonus_conf_pct
             ajustements["Configuration (Chambres)"] = {"pct": bonus_conf_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
+        # Étage (Appartement)
         if type_bien == "Appartement":
             if etage == 0:
-                impact = valeur_bati_courante * 0.02
-                ajustements["Rez-de-chaussee"] = {"pct": 2.0, "valeur": impact}
+                bonus_etage_pct = 0.02
+                impact = valeur_bati_courante * bonus_etage_pct
+                ajustements["Rez-de-chaussée"] = {"pct": bonus_etage_pct * 100, "valeur": impact}
                 valeur_bati_courante += impact
             elif etage > 3 and "Ascenseur" not in equipements:
-                impact = valeur_bati_courante * -0.05
-                ajustements["Etage eleve sans ascenseur"] = {"pct": -5.0, "valeur": impact}
+                malus_etage_pct = -0.05
+                impact = valeur_bati_courante * malus_etage_pct
+                ajustements["Étage élevé sans ascenseur"] = {"pct": malus_etage_pct * 100, "valeur": impact}
                 valeur_bati_courante += impact
 
+        # Équipements (LISTE COMPLÈTE)
         bonus_equip_pct = 0
         if "Piscine" in equipements: bonus_equip_pct += 0.08
         if "Ascenseur" in equipements: bonus_equip_pct += 0.05
-        if "Groupe electrogene" in equipements: bonus_equip_pct += 0.04
+        if "Groupe électrogène" in equipements: bonus_equip_pct += 0.04
         if "panneau solaire" in equipements: bonus_equip_pct += 0.03
-        if "Electricite H24" in equipements: bonus_equip_pct += 0.04
-        if "Securite 24h/24" in equipements: bonus_equip_pct += 0.04
+        if "Électricité H24" in equipements: bonus_equip_pct += 0.04
+        if "Sécurité 24h/24" in equipements: bonus_equip_pct += 0.04
         if "Climatisation" in equipements: bonus_equip_pct += 0.03
         if "Balcon/Terrasse" in equipements: bonus_equip_pct += 0.03
-        if "Cuisine equipee" in equipements: bonus_equip_pct += 0.03
+        if "Cuisine équipée" in equipements: bonus_equip_pct += 0.03
         if "Chauffage" in equipements: bonus_equip_pct += 0.03
         if "eau chaude" in equipements: bonus_equip_pct += 0.02
         
         bonus_equip_pct = min(bonus_equip_pct, 0.30)
+        
         if bonus_equip_pct > 0:
             impact = valeur_bati_courante * bonus_equip_pct
-            ajustements["Equipements de confort"] = {"pct": bonus_equip_pct * 100, "valeur": impact}
+            ajustements["Équipements de confort"] = {"pct": bonus_equip_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
+        # Parking
         bonus_parking_pct = 0
-        if "Prive" in parking_choices: bonus_parking_pct += 0.03
+        if "Privé" in parking_choices: bonus_parking_pct += 0.03
         if "Garage" in parking_choices: bonus_parking_pct += 0.05
         bonus_parking_pct = min(bonus_parking_pct, 0.09)
         if bonus_parking_pct > 0:
@@ -254,9 +290,9 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
             ajustements["Stationnement"] = {"pct": bonus_parking_pct * 100, "valeur": impact}
             valeur_bati_courante += impact
 
-    # --- AJUSTEMENTS TERRAIN (Spécifique Sénégal) ---
+    # 4. AJUSTEMENTS TERRAIN (Spécifique Sénégal)
     if valeur_terrain_courante > 0:
-        # Coefficient de sécurité juridique Sénégal
+        # Hiérarchie des documents fonciers sénégalais
         coef_doc_map = {
             "Titre Foncier": 1.20,             # Le Graal
             "Bail Emphytéotique": 1.10,        # Très sécurisé
@@ -269,21 +305,25 @@ def calculer_estimation(loc, type_bien, segment, surf_hab, surf_terrain, nb_piec
         
         if coef_doc != 1.0:
             impact = valeur_terrain_courante * (coef_doc - 1)
-            ajustements["Securisation Fonciere (Terrain)"] = {"pct": (coef_doc - 1) * 100, "valeur": impact}
+            ajustements["Sécurisation Foncière (Terrain)"] = {"pct": (coef_doc - 1) * 100, "valeur": impact}
             valeur_terrain_courante += impact
 
         if type_bien == "Maison/villa" and cour_jardin == "Oui":
-            impact = valeur_terrain_courante * 0.05
-            ajustements["Amenagement Cour / Jardin"] = {"pct": 5.0, "valeur": impact}
+            bonus_jardin_pct = 0.05
+            impact = valeur_terrain_courante * bonus_jardin_pct
+            ajustements["Aménagement Cour / Jardin"] = {"pct": bonus_jardin_pct * 100, "valeur": impact}
             valeur_terrain_courante += impact
 
+    # 5. FINAL
     estimation_finale = valeur_bati_courante + valeur_terrain_courante
+    
     details = {
         "prix_bati_m2": prix_bati_m2,
         "prix_terrain_m2": prix_terrain_m2,
         "valeur_base_simple": valeur_base_simple,
         "ajustements": ajustements
     }
+    
     return estimation_finale, details, None
 
 # --- INTERFACE ---
@@ -291,28 +331,25 @@ tab1, tab2 = st.tabs(["🏠 Nouvelle Estimation", "🔐 Admin Mirvanie"])
 
 with tab1:
     st.title("🏠 Estimateur Immobilier Mirvanie Sénégal")
-    
+    st.write("Propulsé par l'analyse des micro-zones du Sénégal.")
+
     if not df_zones.empty:
         with st.form("estimation_form"):
             st.subheader("📍 Localisation (Géocodage)")
             
-            # --- AMÉLIORATION : GÉOCODAGE NOMINATIM ---
-            adresse_recherche = st.text_input("Recherchez votre adresse (ex: Almadies, Dakar) :", "")
+            # GÉOCODAGE
+            adresse_recherche = st.text_input("Recherche d'adresse (ex: Almadies, Dakar) :", "")
             if adresse_recherche:
-                with st.spinner("Recherche de l'adresse..."):
-                    geolocator = Nominatim(user_agent="mirvanie_senegal")
+                with st.spinner("Recherche..."):
+                    geolocator = Nominatim(user_agent="mirvanie_senegal_v1")
                     try:
                         location = geolocator.geocode(f"{adresse_recherche}, Senegal")
-                        if location: 
-                            st.success(f"📍 Adresse trouvée : {location.address}")
-                        else: 
-                            st.warning("Adresse introuvable. Utilisez la liste ci-dessous.")
-                    except GeocoderTimedOut: 
-                        st.warning("Service de géocodage indisponible.")
+                        if location: st.success(f"📍 {location.address}")
+                        else: st.warning("Adresse introuvable. Utilisez la liste ci-dessous.")
+                    except GeocoderTimedOut: st.warning("Service de géocodage indisponible.")
 
-            # Liste de secours pour lier l'adresse à la micro-zone
             communes = sorted(df_zones['localisation'].unique())
-            loc_choisie = st.selectbox("Ou sélectionnez la micro-zone correspondante :", communes)
+            loc_choisie = st.selectbox("Sélectionnez la micro-zone exacte :", communes)
             
             types_dispo = sorted(df_zones[df_zones['localisation'] == loc_choisie]['type_bien'].unique())
             type_choisi = st.selectbox("Type de bien :", types_dispo)
@@ -354,7 +391,7 @@ with tab1:
                     etat_bien = "bon"
 
             with col2:
-                # Documents fonciers Sénégalais
+                # DOCUMENTS FONCIERS SÉNÉGAL
                 docs_foncier = st.multiselect("Document(s) foncier(s) :", [
                     "Titre Foncier", "Bail Emphytéotique", "Acte Administratif", 
                     "Délibération Municipale", "Permis d'Occuper", "Non communiqué"
@@ -362,10 +399,12 @@ with tab1:
                 
                 parking_choices = st.multiselect("Stationnement :", ["Aucun", "Rue", "Privé", "Garage"], default=["Aucun"])
                 
+                # LISTE COMPLÈTE DES ÉQUIPEMENTS
                 equipements = st.multiselect("Équipements :", [
                     "Balcon/Terrasse", "Ascenseur", "Piscine", "Chauffage", 
                     "eau chaude", "panneau solaire", "Groupe électrogène",
-                    "Climatisation", "Électricité H24", "Sécurité 24h/24", "Cuisine équipée"
+                    "Climatisation", "Électricité H24", "Sécurité 24h/24", 
+                    "Cuisine équipée"
                 ])
 
             submit = st.form_submit_button("💰 Lancer l'estimation", use_container_width=True)
@@ -391,6 +430,7 @@ with tab1:
                     for k, v in details['ajustements'].items():
                         st.write(f"- {k} : **{v['pct']:+.1f}%**")
                 
+                # Enregistrement BDD
                 conn = sqlite3.connect('mirvanie_estimations_sn.db')
                 c = conn.cursor()
                 c.execute('''INSERT INTO estimations 
@@ -403,6 +443,7 @@ with tab1:
                 conn.commit()
                 conn.close()
 
+                # PDF
                 pdf_data = {
                     "Localisation": loc_choisie, "Type": type_choisi, "Marche": segment_choisi,
                     "Surface habitable": surface_habitable, "Surface terrain": surface_terrain,
@@ -447,6 +488,7 @@ with tab2:
         conn.close()
         
         if not df_estimations.empty:
+            # KPI DASHBOARD
             st.subheader("📊 Indicateurs Clés")
             kpi1, kpi2, kpi3 = st.columns(3)
             
@@ -455,13 +497,18 @@ with tab2:
             zone_top = df_estimations['adresse'].mode()[0] if not df_estimations['adresse'].empty else "N/A"
             
             kpi1.metric("Total Estimations", total_est)
-            kpi2.metric("Valeur Moyenne", f"{prix_moyen:,.0f} FCFA")
-            kpi3.metric("Zone Top", zone_top)
+            kpi2.metric("Valeur Moyenne Estimée", f"{prix_moyen:,.0f} FCFA")
+            kpi3.metric("Zone la plus demandée", zone_top)
             
             st.divider()
+            
             st.subheader("📋 Historique des estimations")
             csv = df_estimations.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Exporter en CSV", data=csv, file_name="estimations_senegal.csv", mime="text/csv")
-            st.dataframe(df_estimations[['date', 'adresse', 'type_bien', 'segment', 'estimation_totale']], use_container_width=True)
+            st.download_button("📥 Exporter la base complète (CSV)", data=csv, file_name="estimations_senegal.csv", mime="text/csv")
+            
+            st.dataframe(
+                df_estimations[['date', 'adresse', 'type_bien', 'segment', 'surface_habitable', 'estimation_totale']], 
+                use_container_width=True
+            )
         else:
-            st.info("Aucune estimation enregistrée.")
+            st.info("Aucune estimation enregistrée pour le moment.")
